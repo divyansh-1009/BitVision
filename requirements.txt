@@ -10,3 +10,5 @@ matplotlib>=3.7,<4
 seaborn>=0.13,<1
 jupyter>=1.0
 ipykernel>=6.0
+shap>=0.45.0
+ipywidgets>=8.0.0
