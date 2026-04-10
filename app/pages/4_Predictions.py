@@ -5,12 +5,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.components.charts import actual_vs_predicted, residual_chart
+from app.components.charts import actual_vs_predicted
 from app.components.metrics import empty_state, render_metric_row
 from app.utils.config import (
     LAYOUT,
@@ -20,9 +19,16 @@ from app.utils.config import (
     PROCESSED_DATA_DIR,
     RAW_DATA_DIR,
 )
-from src.data_loader import list_data_files, load_processed_data, load_raw_data
-from src.feature_engineering import build_features
-from src.inference import compute_metrics, list_models, load_model, predict
+from app.utils.data_loader import list_data_files, load_processed_data, load_raw_data, resolve_data_file
+from app.utils.feature_engineering import build_features
+from app.utils.inference import (
+    align_features_for_model,
+    choose_default_model,
+    compute_metrics,
+    list_models,
+    load_model,
+    predict,
+)
 
 st.set_page_config(page_title=f"{PAGE_TITLE} — Predictions", page_icon=PAGE_ICON, layout=LAYOUT)
 
@@ -56,14 +62,15 @@ if not processed_files and not raw_files:
 
 with st.sidebar:
     st.header("Prediction Settings")
-    selected_model_name = st.selectbox("Model", available_models)
+    default_model = choose_default_model(available_models)
+    selected_model_name = default_model if default_model else available_models[0]
 
     if processed_files:
         data_file = st.selectbox("Data file", processed_files, key="pred_data")
-        data_path = PROCESSED_DATA_DIR / data_file
+        data_path = resolve_data_file(PROCESSED_DATA_DIR, data_file)
     else:
         data_file = st.selectbox("Data file (raw)", raw_files, key="pred_data_raw")
-        data_path = RAW_DATA_DIR / data_file
+        data_path = resolve_data_file(RAW_DATA_DIR, data_file)
 
 # ── Load model & data ───────────────────────────────────────────────────────
 
@@ -89,26 +96,135 @@ if numeric_features.empty:
     st.error("No numeric feature columns found for prediction.")
     st.stop()
 
-features_clean = numeric_features.dropna()
+aligned_features, missing_features = align_features_for_model(model, numeric_features)
+if missing_features:
+    has_ohlc = {"Open", "High", "Low", "Close"}.issubset(set(df.columns))
+    if has_ohlc:
+        df = build_features(df)
+        feature_cols = [c for c in df.columns if c not in non_feature_cols]
+        numeric_features = df[feature_cols].select_dtypes(include="number")
+        aligned_features, missing_features = align_features_for_model(model, numeric_features)
+
+if missing_features:
+    st.error(
+        "The selected model expects missing feature columns: "
+        + ", ".join(missing_features[:15])
+        + ("..." if len(missing_features) > 15 else "")
+    )
+    st.stop()
+
+features_clean = aligned_features.dropna()
 if features_clean.empty:
-    st.error("All rows contain NaN values after dropping missing data.")
+    # Short testing files can produce all-NaN rolling features (e.g., 7-day windows).
+    # Retry by prepending training-history rows, then keep only the selected file rows.
+    has_ohlc = {"Date", "Open", "High", "Low", "Close"}.issubset(set(df.columns))
+    testing_like = "test" in data_file.lower()
+    training_candidates = [f for f in raw_files if "train" in f.lower() and f != data_file]
+
+    if has_ohlc and testing_like and training_candidates:
+        history_path = resolve_data_file(RAW_DATA_DIR, training_candidates[0])
+        history_df = load_raw_data(history_path)
+
+        if not history_df.empty:
+            selected_raw = load_raw_data(data_path)
+            selected_raw = selected_raw.copy()
+            selected_raw["__is_selected__"] = 1
+            history_df = history_df.copy()
+            history_df["__is_selected__"] = 0
+
+            combined = pd.concat([history_df, selected_raw], ignore_index=True)
+            combined = combined.sort_values("Date").drop_duplicates(subset=["Date"], keep="last")
+            enriched = build_features(combined)
+
+            selected_enriched = enriched[enriched["__is_selected__"] == 1].copy()
+            if "__is_selected__" in selected_enriched.columns:
+                selected_enriched = selected_enriched.drop(columns=["__is_selected__"])
+
+            feature_cols = [c for c in selected_enriched.columns if c not in non_feature_cols]
+            numeric_features = selected_enriched[feature_cols].select_dtypes(include="number")
+            aligned_features, missing_features = align_features_for_model(model, numeric_features)
+            features_clean = aligned_features.dropna()
+            df = selected_enriched
+
+if features_clean.empty:
+    st.error(
+        "All rows contain NaN values after dropping missing data. "
+        "For short testing files, include enough prior history (or use combined train+test data) "
+        "so rolling features can be computed."
+    )
     st.stop()
 
 valid_idx = features_clean.index
 dates = df.loc[valid_idx, "Date"]
-actual = df.loc[valid_idx, "Close"].values
+current_close = pd.to_numeric(df.loc[valid_idx, "Close"], errors="coerce")
 
 try:
-    predicted = predict(model, features_clean)
+    pred_next_return = predict(model, features_clean)
 except Exception as e:
     st.error(f"Prediction failed: {e}")
     st.stop()
 
+pred_next_close = current_close * (1 + pd.Series(pred_next_return, index=valid_idx))
+actual_next_close = pd.to_numeric(df["Close"], errors="coerce").shift(-1).loc[valid_idx]
+
+comparison_df = pd.DataFrame(
+    {
+        "Date": dates,
+        "ActualNextClose": actual_next_close,
+        "PredictedNextClose": pred_next_close,
+    },
+    index=valid_idx,
+).dropna()
+
+if comparison_df.empty:
+    st.error("No valid rows remain after aligning next-close targets.")
+    st.stop()
+
+# ── Timeframe filter ────────────────────────────────────────────────────────
+
+st.subheader("Timeframe")
+tf_col1, tf_col2 = st.columns(2)
+min_date = comparison_df["Date"].min().date()
+max_date = comparison_df["Date"].max().date()
+start_date = tf_col1.date_input(
+    "Start date",
+    value=min_date,
+    min_value=min_date,
+    max_value=max_date,
+    key="pred_start_date",
+)
+end_date = tf_col2.date_input(
+    "End date",
+    value=max_date,
+    min_value=min_date,
+    max_value=max_date,
+    key="pred_end_date",
+)
+
+if start_date > end_date:
+    st.error("Start date must be before or equal to end date.")
+    st.stop()
+
+mask = (
+    (comparison_df["Date"] >= pd.Timestamp(start_date))
+    & (comparison_df["Date"] <= pd.Timestamp(end_date))
+)
+comparison_df = comparison_df.loc[mask]
+
+if comparison_df.empty:
+    st.warning("No prediction rows available in the selected timeframe.")
+    st.stop()
+
+plot_idx = comparison_df.index
+dates = comparison_df["Date"]
+actual = comparison_df["ActualNextClose"].to_numpy(dtype=float)
+predicted = comparison_df["PredictedNextClose"].to_numpy(dtype=float)
+
 # ── Actual vs Predicted ──────────────────────────────────────────────────────
 
-st.subheader("Actual vs. Predicted")
+st.subheader("Actual Next Close vs. Predicted Next Close")
 st.plotly_chart(
-    actual_vs_predicted(dates, pd.Series(actual, index=valid_idx), pd.Series(predicted, index=valid_idx)),
+    actual_vs_predicted(dates, pd.Series(actual, index=plot_idx), pd.Series(predicted, index=plot_idx)),
     use_container_width=True,
 )
 
@@ -125,36 +241,10 @@ render_metric_row(
     ]
 )
 
-# ── Residual analysis ────────────────────────────────────────────────────────
-
-st.subheader("Residual Analysis")
-
-residuals = actual - predicted
-
-col_a, col_b = st.columns(2)
-
-with col_a:
-    st.markdown("**Residuals Over Time**")
-    st.plotly_chart(
-        residual_chart(dates, pd.Series(residuals, index=valid_idx)),
-        use_container_width=True,
-    )
-
-with col_b:
-    st.markdown("**Residual Distribution**")
-    fig_hist = px.histogram(
-        x=residuals,
-        nbins=50,
-        template="plotly_dark",
-        color_discrete_sequence=["#f7931a"],
-        labels={"x": "Residual"},
-    )
-    fig_hist.update_layout(margin=dict(l=0, r=0, t=30, b=0), height=300)
-    st.plotly_chart(fig_hist, use_container_width=True)
-
 # ── Error summary ────────────────────────────────────────────────────────────
 
 st.subheader("Error Summary")
+residuals = actual - predicted
 err_df = pd.DataFrame(
     {
         "Statistic": ["Mean Error", "Median Error", "Std Error", "Min Error", "Max Error"],

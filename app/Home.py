@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -11,14 +12,12 @@ from app.components.charts import sparkline_chart
 from app.components.metrics import empty_state, render_metric_row
 from app.utils.config import (
     LAYOUT,
-    MODELS_DIR,
     PAGE_ICON,
     PAGE_TITLE,
     PROCESSED_DATA_DIR,
     RAW_DATA_DIR,
 )
-from src.data_loader import list_data_files, load_raw_data
-from src.inference import list_models
+from app.utils.data_loader import list_data_files, load_processed_data, load_raw_data, resolve_data_file
 
 st.set_page_config(page_title=PAGE_TITLE, page_icon=PAGE_ICON, layout=LAYOUT)
 
@@ -45,11 +44,25 @@ if not data_available:
 
 # Prefer processed data; fall back to raw
 if processed_files:
-    data_path = PROCESSED_DATA_DIR / processed_files[0]
+    data_path = resolve_data_file(PROCESSED_DATA_DIR, processed_files[0])
+    df = load_processed_data(data_path)
 else:
-    data_path = RAW_DATA_DIR / raw_files[0]
+    data_path = resolve_data_file(RAW_DATA_DIR, raw_files[0])
+    df = load_raw_data(data_path)
 
-df = load_raw_data(data_path)
+# Ensure key numeric columns are safe for metric formatting even if CSV values are strings.
+for col in ["Open", "High", "Low", "Close", "Volume"]:
+    if col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+if "Close" not in df.columns or df["Close"].dropna().empty:
+    st.error("Dataset must contain numeric `Close` values.")
+    st.stop()
+
+if "Volume" not in df.columns:
+    df["Volume"] = 0
+else:
+    df["Volume"] = df["Volume"].fillna(0)
 
 # ── Metric cards ─────────────────────────────────────────────────────────────
 
@@ -82,10 +95,6 @@ render_metric_row(
             "value": f"{price_change_30d:+.2f}%",
             "delta": f"${latest['Close'] - month_ago['Close']:+,.2f}",
         },
-        {
-            "label": "Volume",
-            "value": f"{latest['Volume']:,.0f}",
-        },
     ]
 )
 
@@ -101,31 +110,9 @@ st.subheader("Quick Stats")
 
 year_data = df.tail(365)
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("52-Week High", f"${year_data['High'].max():,.2f}")
 col2.metric("52-Week Low", f"${year_data['Low'].min():,.2f}")
 col3.metric("All-Time High", f"${df['High'].max():,.2f}")
-
-col4, col5, col6 = st.columns(3)
-col4.metric("Avg Daily Volume (30d)", f"{recent['Volume'].mean():,.0f}")
-col5.metric("Latest Date", str(latest["Date"].date()) if hasattr(latest["Date"], "date") else str(latest["Date"]))
-col6.metric("Total Records", f"{len(df):,}")
-
-# ── Prediction summary ──────────────────────────────────────────────────────
-
-st.divider()
-st.subheader("Prediction Summary")
-
-available_models = list_models(MODELS_DIR)
-if not available_models:
-    st.info(
-        "No trained models found. Place `.pkl` model files in `models/` "
-        "to see prediction summaries here.",
-        icon="🤖",
-    )
-else:
-    st.success(
-        f"**{len(available_models)} model(s) available:** {', '.join(available_models)}. "
-        "Visit the **Predictions** page for detailed forecasts.",
-        icon="✅",
-    )
+col4.metric("Latest Date", str(latest["Date"].date()) if hasattr(latest["Date"], "date") else str(latest["Date"]))
+col5.metric("Total Records", f"{len(df):,}")

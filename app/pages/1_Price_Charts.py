@@ -16,7 +16,7 @@ from app.utils.config import (
     PROCESSED_DATA_DIR,
     RAW_DATA_DIR,
 )
-from src.data_loader import list_data_files, load_raw_data
+from app.utils.data_loader import list_data_files, load_raw_data, resolve_data_file
 
 st.set_page_config(page_title=f"{PAGE_TITLE} — Price Charts", page_icon=PAGE_ICON, layout=LAYOUT)
 
@@ -38,9 +38,9 @@ if not raw_files and not processed_files:
 
 all_files: list[tuple[str, Path]] = []
 for f in processed_files:
-    all_files.append((f"[processed] {f}", PROCESSED_DATA_DIR / f))
+    all_files.append((f"[processed] {f}", resolve_data_file(PROCESSED_DATA_DIR, f)))
 for f in raw_files:
-    all_files.append((f"[raw] {f}", RAW_DATA_DIR / f))
+    all_files.append((f"[raw] {f}", resolve_data_file(RAW_DATA_DIR, f)))
 
 # ── Sidebar controls ────────────────────────────────────────────────────────
 
@@ -50,7 +50,7 @@ with st.sidebar:
     selected_label = st.selectbox("Data file", [label for label, _ in all_files])
     selected_path = dict(all_files)[selected_label]
 
-    chart_type = st.radio("Chart type", ["Candlestick", "Line", "OHLC"], horizontal=True)
+    chart_type = st.radio("Chart type", ["Candlestick", "Line"], horizontal=True)
 
     st.subheader("Moving Averages")
     sma_options = st.multiselect("SMA windows", [20, 50, 100, 200], default=[])

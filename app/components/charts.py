@@ -30,7 +30,7 @@ def candlestick_chart(
     height: int = 600,
 ) -> go.Figure:
     """Build an interactive candlestick (or line/OHLC) chart with optional overlays."""
-    from src.technical_indicators import compute_bollinger_bands, compute_ema, compute_sma
+    from app.utils.technical_indicators import compute_bollinger_bands, compute_ema, compute_sma
 
     row_heights = [0.7, 0.3] if show_volume else [1.0]
     rows = 2 if show_volume else 1
@@ -135,12 +135,20 @@ def candlestick_chart(
         )
 
     if show_volume:
+        volume_up = "#80deea"
+        volume_down = "#ffab91"
         colors = [
-            COLOR_UP if c >= o else COLOR_DOWN
+            volume_up if c >= o else volume_down
             for c, o in zip(df["Close"], df["Open"])
         ]
         fig.add_trace(
-            go.Bar(x=df["Date"], y=df["Volume"], marker_color=colors, name="Volume", opacity=0.6),
+            go.Bar(
+                x=df["Date"],
+                y=df["Volume"],
+                marker_color=colors,
+                name="Volume",
+                opacity=0.95,
+            ),
             row=2, col=1,
         )
         fig.update_yaxes(title_text="Volume", row=2, col=1)
@@ -198,7 +206,7 @@ def technical_subplot(
     height_per_panel: int = 200,
 ) -> go.Figure:
     """Stacked subplots of selected technical indicators, synced on x-axis."""
-    from src.technical_indicators import (
+    from app.utils.technical_indicators import (
         compute_atr,
         compute_bollinger_bands,
         compute_macd,
@@ -209,15 +217,22 @@ def technical_subplot(
     )
 
     n_panels = 1 + len(indicators)
-    panel_heights = [0.35] + [0.65 / len(indicators)] * len(indicators) if indicators else [1.0]
-    total_height = 350 + height_per_panel * len(indicators)
+    if indicators:
+        # Keep the price panel compact and allocate more space to indicator panes.
+        price_height = 0.28
+        indicator_height = (1.0 - price_height) / len(indicators)
+        panel_heights = [price_height] + [indicator_height] * len(indicators)
+    else:
+        panel_heights = [1.0]
+
+    total_height = max(700, 420 + (300 * len(indicators)))
 
     titles = ["Price"] + indicators
     fig = make_subplots(
         rows=n_panels,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.02,
+        vertical_spacing=0.08,
         row_heights=panel_heights,
         subplot_titles=titles,
     )
@@ -288,10 +303,11 @@ def technical_subplot(
     fig.update_layout(
         template=PLOTLY_TEMPLATE,
         height=total_height,
-        margin=dict(l=0, r=0, t=30, b=0),
+        margin=dict(l=0, r=0, t=60, b=20),
         xaxis_rangeslider_visible=False,
-        showlegend=True,
-        legend=dict(orientation="h", y=1.02, x=0),
+        # With many indicators selected, legends become unreadable and obscure plots.
+        # Subplot titles and known colors are clearer in this dense layout.
+        showlegend=False,
     )
     return fig
 
