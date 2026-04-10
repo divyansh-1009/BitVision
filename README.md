@@ -1,5 +1,7 @@
 # BitVision: Bitcoin Forecasting Model
 
+Live deployment: https://bitvision-iitj.streamlit.app/
+
 BitVision is an end-to-end Bitcoin forecasting project that combines time-series feature engineering, model experimentation, and an interactive Streamlit dashboard for analysis and predictions.
 
 ## Problem Statement
