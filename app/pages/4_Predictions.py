@@ -213,8 +213,6 @@ render_metric_row(
     [
         {"label": "MAE", "value": f"${metrics['MAE']:,.2f}"},
         {"label": "RMSE", "value": f"${metrics['RMSE']:,.2f}"},
-        {"label": "MAPE", "value": f"{metrics['MAPE']:.2f}%"},
-        {"label": "R-squared", "value": f"{metrics['R2']:.4f}"},
     ]
 )
 
