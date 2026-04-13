@@ -16,6 +16,7 @@ def compute_ema(series: pd.Series, span: int = 20) -> pd.Series:
 def compute_bollinger_bands(
     series: pd.Series, *, window: int = 20, num_std: float = 2.0
 ) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Upper/lower bands are middle ± num_std × rolling std of *series* (σ is from the data)."""
     middle = compute_sma(series, window=window)
     std = series.rolling(window=window, min_periods=window).std()
     upper = middle + (num_std * std)

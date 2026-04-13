@@ -22,12 +22,11 @@ from app.utils.config import (
 from app.utils.data_loader import list_data_files, load_processed_data, load_raw_data, resolve_data_file
 from app.utils.feature_engineering import build_features
 from app.utils.inference import (
-    align_features_for_model,
     choose_default_model,
     compute_metrics,
     list_models,
     load_model,
-    predict,
+    prediction_comparison_table,
 )
 
 st.set_page_config(page_title=f"{PAGE_TITLE} — Predictions", page_icon=PAGE_ICON, layout=LAYOUT)
@@ -86,35 +85,26 @@ if "Date" not in df.columns or "Close" not in df.columns:
     st.error("Data must contain `Date` and `Close` columns.")
     st.stop()
 
-# ── Prepare features ────────────────────────────────────────────────────────
+# ── Prepare features & predict ───────────────────────────────────────────────
 
-non_feature_cols = {"Date", "Close"}
-feature_cols = [c for c in df.columns if c not in non_feature_cols]
-numeric_features = df[feature_cols].select_dtypes(include="number")
-
-if numeric_features.empty:
-    st.error("No numeric feature columns found for prediction.")
+try:
+    comparison_df, missing_features, df, empty_reason, _pred_series = prediction_comparison_table(df, model)
+except RuntimeError as e:
+    st.error(str(e))
     st.stop()
 
-aligned_features, missing_features = align_features_for_model(model, numeric_features)
 if missing_features:
-    has_ohlc = {"Open", "High", "Low", "Close"}.issubset(set(df.columns))
-    if has_ohlc:
-        df = build_features(df)
-        feature_cols = [c for c in df.columns if c not in non_feature_cols]
-        numeric_features = df[feature_cols].select_dtypes(include="number")
-        aligned_features, missing_features = align_features_for_model(model, numeric_features)
-
-if missing_features:
-    st.error(
-        "The selected model expects missing feature columns: "
-        + ", ".join(missing_features[:15])
-        + ("..." if len(missing_features) > 15 else "")
-    )
+    if missing_features == ["no_numeric_feature_columns"]:
+        st.error("No numeric feature columns found for prediction.")
+    else:
+        st.error(
+            "The selected model expects missing feature columns: "
+            + ", ".join(missing_features[:15])
+            + ("..." if len(missing_features) > 15 else "")
+        )
     st.stop()
 
-features_clean = aligned_features.dropna()
-if features_clean.empty:
+if comparison_df.empty:
     # Short testing files can produce all-NaN rolling features (e.g., 7-day windows).
     # Retry by prepending training-history rows, then keep only the selected file rows.
     has_ohlc = {"Date", "Open", "High", "Low", "Close"}.issubset(set(df.columns))
@@ -140,44 +130,31 @@ if features_clean.empty:
             if "__is_selected__" in selected_enriched.columns:
                 selected_enriched = selected_enriched.drop(columns=["__is_selected__"])
 
-            feature_cols = [c for c in selected_enriched.columns if c not in non_feature_cols]
-            numeric_features = selected_enriched[feature_cols].select_dtypes(include="number")
-            aligned_features, missing_features = align_features_for_model(model, numeric_features)
-            features_clean = aligned_features.dropna()
-            df = selected_enriched
+            try:
+                comparison_df, missing_features, df, empty_reason, _pred_series = prediction_comparison_table(
+                    selected_enriched, model
+                )
+            except RuntimeError as e:
+                st.error(str(e))
+                st.stop()
 
-if features_clean.empty:
-    st.error(
-        "All rows contain NaN values after dropping missing data. "
-        "For short testing files, include enough prior history (or use combined train+test data) "
-        "so rolling features can be computed."
-    )
-    st.stop()
-
-valid_idx = features_clean.index
-dates = df.loc[valid_idx, "Date"]
-current_close = pd.to_numeric(df.loc[valid_idx, "Close"], errors="coerce")
-
-try:
-    pred_next_return = predict(model, features_clean)
-except Exception as e:
-    st.error(f"Prediction failed: {e}")
-    st.stop()
-
-pred_next_close = current_close * (1 + pd.Series(pred_next_return, index=valid_idx))
-actual_next_close = pd.to_numeric(df["Close"], errors="coerce").shift(-1).loc[valid_idx]
-
-comparison_df = pd.DataFrame(
-    {
-        "Date": dates,
-        "ActualNextClose": actual_next_close,
-        "PredictedNextClose": pred_next_close,
-    },
-    index=valid_idx,
-).dropna()
+            if missing_features:
+                st.error(
+                    "The selected model expects missing feature columns: "
+                    + ", ".join(missing_features[:15])
+                    + ("..." if len(missing_features) > 15 else "")
+                )
+                st.stop()
 
 if comparison_df.empty:
-    st.error("No valid rows remain after aligning next-close targets.")
+    if empty_reason == "no_comparison_rows":
+        st.error("No valid rows remain after aligning next-close targets.")
+    else:
+        st.error(
+            "All rows contain NaN values after dropping missing data. "
+            "For short testing files, include enough prior history (or use combined train+test data) "
+            "so rolling features can be computed."
+        )
     st.stop()
 
 # ── Timeframe filter ────────────────────────────────────────────────────────

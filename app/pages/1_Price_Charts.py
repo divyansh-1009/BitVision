@@ -1,4 +1,4 @@
-"""Interactive price charts with overlays and volume."""
+"""Interactive price charts (OHLC / candlestick / line)."""
 
 import sys
 from pathlib import Path
@@ -21,7 +21,7 @@ from app.utils.data_loader import list_data_files, load_raw_data, resolve_data_f
 st.set_page_config(page_title=f"{PAGE_TITLE} — Price Charts", page_icon=PAGE_ICON, layout=LAYOUT)
 
 st.title("Price Charts")
-st.caption("Interactive OHLC, candlestick, and line charts with moving-average overlays")
+st.caption("Interactive OHLC, candlestick, and line charts")
 
 # ── Data loading ─────────────────────────────────────────────────────────────
 
@@ -52,17 +52,6 @@ with st.sidebar:
 
     chart_type = st.radio("Chart type", ["Candlestick", "Line"], horizontal=True)
 
-    st.subheader("Moving Averages")
-    sma_options = st.multiselect("SMA windows", [20, 50, 100, 200], default=[])
-    ema_options = st.multiselect("EMA spans", [12, 26, 50], default=[])
-
-    st.subheader("Bollinger Bands")
-    show_bb = st.checkbox("Show Bollinger Bands", value=False)
-    bb_window = st.slider("BB window", 5, 50, 20) if show_bb else 20
-    bb_std = st.slider("BB std dev", 1.0, 3.0, 2.0, 0.5) if show_bb else 2.0
-
-    show_volume = st.checkbox("Show volume", value=True)
-
 # ── Load & filter ────────────────────────────────────────────────────────────
 
 df = load_raw_data(selected_path)
@@ -87,12 +76,6 @@ if filtered.empty:
 
 fig = candlestick_chart(
     filtered,
-    show_volume=show_volume,
-    sma_windows=sma_options or None,
-    ema_spans=ema_options or None,
-    show_bollinger=show_bb,
-    bollinger_window=bb_window,
-    bollinger_std=bb_std,
     chart_type=chart_type,
     height=650,
 )

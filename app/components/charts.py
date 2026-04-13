@@ -20,7 +20,6 @@ from app.utils.config import (
 def candlestick_chart(
     df: pd.DataFrame,
     *,
-    show_volume: bool = True,
     sma_windows: list[int] | None = None,
     ema_spans: list[int] | None = None,
     show_bollinger: bool = False,
@@ -32,15 +31,12 @@ def candlestick_chart(
     """Build an interactive candlestick (or line/OHLC) chart with optional overlays."""
     from app.utils.technical_indicators import compute_bollinger_bands, compute_ema, compute_sma
 
-    row_heights = [0.7, 0.3] if show_volume else [1.0]
-    rows = 2 if show_volume else 1
-
     fig = make_subplots(
-        rows=rows,
+        rows=1,
         cols=1,
         shared_xaxes=True,
         vertical_spacing=0.03,
-        row_heights=row_heights,
+        row_heights=[1.0],
     )
 
     if chart_type == "Candlestick":
@@ -134,25 +130,6 @@ def candlestick_chart(
             row=1, col=1,
         )
 
-    if show_volume:
-        volume_up = "#80deea"
-        volume_down = "#ffab91"
-        colors = [
-            volume_up if c >= o else volume_down
-            for c, o in zip(df["Close"], df["Open"])
-        ]
-        fig.add_trace(
-            go.Bar(
-                x=df["Date"],
-                y=df["Volume"],
-                marker_color=colors,
-                name="Volume",
-                opacity=0.95,
-            ),
-            row=2, col=1,
-        )
-        fig.update_yaxes(title_text="Volume", row=2, col=1)
-
     fig.update_layout(
         template=PLOTLY_TEMPLATE,
         height=height,
@@ -198,22 +175,21 @@ def technical_subplot(
     macd_fast: int = 12,
     macd_slow: int = 26,
     macd_signal: int = 9,
+    sma_windows: list[int] | None = None,
+    ema_spans: list[int] | None = None,
+    show_bollinger: bool = False,
     bb_window: int = 20,
     bb_std: float = 2.0,
-    stoch_k: int = 14,
-    stoch_d: int = 3,
-    atr_period: int = 14,
     height_per_panel: int = 200,
 ) -> go.Figure:
     """Stacked subplots of selected technical indicators, synced on x-axis."""
     from app.utils.technical_indicators import (
-        compute_atr,
         compute_bollinger_bands,
+        compute_ema,
         compute_macd,
         compute_obv,
         compute_rsi,
         compute_sma,
-        compute_stochastic,
     )
 
     n_panels = 1 + len(indicators)
@@ -227,7 +203,12 @@ def technical_subplot(
 
     total_height = max(700, 420 + (300 * len(indicators)))
 
-    titles = ["Price"] + indicators
+    def _subplot_title(ind: str) -> str:
+        if ind == "MACD":
+            return f"MACD ({macd_fast} / {macd_slow} / {macd_signal})"
+        return ind
+
+    titles = ["Price"] + [_subplot_title(n) for n in indicators]
     fig = make_subplots(
         rows=n_panels,
         cols=1,
@@ -237,31 +218,67 @@ def technical_subplot(
         subplot_titles=titles,
     )
 
-    upper, mid, lower = compute_bollinger_bands(df["Close"], window=bb_window, num_std=bb_std)
     fig.add_trace(
         go.Candlestick(
             x=df["Date"], open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
             increasing_line_color=COLOR_UP, decreasing_line_color=COLOR_DOWN, name="OHLC",
+            showlegend=False,
         ),
         row=1, col=1,
     )
 
-    if "Bollinger Bands" in indicators:
-        fig.add_trace(go.Scatter(x=df["Date"], y=upper, mode="lines", name="BB Upper",
-                                 line=dict(width=1, dash="dash", color=COLOR_SECONDARY)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df["Date"], y=lower, mode="lines", name="BB Lower",
-                                 line=dict(width=1, dash="dash", color=COLOR_SECONDARY),
-                                 fill="tonexty", fillcolor="rgba(79,195,247,0.08)"), row=1, col=1)
+    overlay_colors = ["#ffab40", "#42a5f5", "#ab47bc", "#66bb6a", "#ef5350"]
+    if sma_windows:
+        for i, w in enumerate(sma_windows):
+            sma = compute_sma(df["Close"], window=w)
+            fig.add_trace(
+                go.Scatter(
+                    x=df["Date"], y=sma, mode="lines", name=f"SMA {w}",
+                    line=dict(width=1.2, color=overlay_colors[i % len(overlay_colors)]),
+                    showlegend=False,
+                ),
+                row=1, col=1,
+            )
+    if ema_spans:
+        for i, s in enumerate(ema_spans):
+            ema = compute_ema(df["Close"], span=s)
+            fig.add_trace(
+                go.Scatter(
+                    x=df["Date"], y=ema, mode="lines", name=f"EMA {s}",
+                    line=dict(width=1.2, dash="dot", color=overlay_colors[(i + 2) % len(overlay_colors)]),
+                    showlegend=False,
+                ),
+                row=1, col=1,
+            )
 
-    sma20 = compute_sma(df["Close"], window=20)
-    fig.add_trace(go.Scatter(x=df["Date"], y=sma20, mode="lines", name="SMA 20",
-                             line=dict(width=1, color="#ffab40")), row=1, col=1)
+    if show_bollinger:
+        upper, _mid, lower = compute_bollinger_bands(df["Close"], window=bb_window, num_std=bb_std)
+        fig.add_trace(
+            go.Scatter(
+                x=df["Date"], y=upper, mode="lines", name="BB Upper",
+                line=dict(width=1, dash="dash", color=COLOR_SECONDARY), showlegend=False,
+            ),
+            row=1, col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=df["Date"], y=lower, mode="lines", name="BB Lower",
+                line=dict(width=1, dash="dash", color=COLOR_SECONDARY),
+                fill="tonexty", fillcolor="rgba(79,195,247,0.08)", showlegend=False,
+            ),
+            row=1, col=1,
+        )
 
     for idx, name in enumerate(indicators, start=2):
         if name == "RSI":
             rsi = compute_rsi(df["Close"], period=rsi_period)
-            fig.add_trace(go.Scatter(x=df["Date"], y=rsi, mode="lines", name="RSI",
-                                     line=dict(color=COLOR_ACCENT)), row=idx, col=1)
+            fig.add_trace(
+                go.Scatter(
+                    x=df["Date"], y=rsi, mode="lines", name="RSI",
+                    line=dict(color=COLOR_ACCENT), showlegend=False,
+                ),
+                row=idx, col=1,
+            )
             fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=idx, col=1)
             fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=idx, col=1)
             fig.update_yaxes(range=[0, 100], row=idx, col=1)
@@ -269,36 +286,55 @@ def technical_subplot(
         elif name == "MACD":
             ml, sl, hist = compute_macd(df["Close"], fast=macd_fast, slow=macd_slow, signal=macd_signal)
             colors = [COLOR_UP if v >= 0 else COLOR_DOWN for v in hist]
-            fig.add_trace(go.Bar(x=df["Date"], y=hist, marker_color=colors, name="MACD Hist", opacity=0.5),
-                          row=idx, col=1)
-            fig.add_trace(go.Scatter(x=df["Date"], y=ml, mode="lines", name="MACD",
-                                     line=dict(color=COLOR_PRIMARY)), row=idx, col=1)
-            fig.add_trace(go.Scatter(x=df["Date"], y=sl, mode="lines", name="Signal",
-                                     line=dict(color=COLOR_SECONDARY)), row=idx, col=1)
-
-        elif name == "Stochastic":
-            k, d = compute_stochastic(df["High"], df["Low"], df["Close"],
-                                       k_period=stoch_k, d_period=stoch_d)
-            fig.add_trace(go.Scatter(x=df["Date"], y=k, mode="lines", name="%K",
-                                     line=dict(color=COLOR_PRIMARY)), row=idx, col=1)
-            fig.add_trace(go.Scatter(x=df["Date"], y=d, mode="lines", name="%D",
-                                     line=dict(color=COLOR_SECONDARY)), row=idx, col=1)
-            fig.add_hline(y=80, line_dash="dash", line_color="red", opacity=0.5, row=idx, col=1)
-            fig.add_hline(y=20, line_dash="dash", line_color="green", opacity=0.5, row=idx, col=1)
-            fig.update_yaxes(range=[0, 100], row=idx, col=1)
-
-        elif name == "ATR":
-            atr = compute_atr(df["High"], df["Low"], df["Close"], period=atr_period)
-            fig.add_trace(go.Scatter(x=df["Date"], y=atr, mode="lines", name="ATR",
-                                     line=dict(color=COLOR_ACCENT)), row=idx, col=1)
+            fig.add_trace(
+                go.Bar(
+                    x=df["Date"], y=hist, marker_color=colors, name="MACD histogram",
+                    opacity=0.5, showlegend=False,
+                ),
+                row=idx, col=1,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=df["Date"], y=ml, mode="lines",
+                    name=f"MACD line (EMA{macd_fast}-EMA{macd_slow} of close)",
+                    line=dict(color=COLOR_PRIMARY), showlegend=False,
+                ),
+                row=idx, col=1,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=df["Date"], y=sl, mode="lines",
+                    name=f"Signal (EMA{macd_signal} of MACD line)",
+                    line=dict(color=COLOR_SECONDARY), showlegend=False,
+                ),
+                row=idx, col=1,
+            )
+            fig.add_annotation(
+                x=0.99,
+                y=0.97,
+                xref="x domain",
+                yref=f"y{idx} domain",
+                xanchor="right",
+                yanchor="top",
+                text="MACD Line (yellow)<br>MACD Signal (blue)",
+                showarrow=False,
+                align="right",
+                font=dict(size=10, color="white"),
+                bgcolor="rgba(18,18,28,0.82)",
+                bordercolor="rgba(255,255,255,0.15)",
+                borderwidth=1,
+                borderpad=6,
+            )
 
         elif name == "OBV":
             obv = compute_obv(df["Close"], df["Volume"])
-            fig.add_trace(go.Scatter(x=df["Date"], y=obv, mode="lines", name="OBV",
-                                     line=dict(color=COLOR_SECONDARY)), row=idx, col=1)
-
-        elif name == "Bollinger Bands":
-            pass
+            fig.add_trace(
+                go.Scatter(
+                    x=df["Date"], y=obv, mode="lines", name="OBV",
+                    line=dict(color=COLOR_SECONDARY), showlegend=False,
+                ),
+                row=idx, col=1,
+            )
 
     fig.update_layout(
         template=PLOTLY_TEMPLATE,
