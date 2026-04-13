@@ -102,7 +102,7 @@ render_metric_row(
 
 st.subheader("Price — Last 30 Days")
 recent = df.tail(30)
-st.plotly_chart(sparkline_chart(recent["Date"], recent["Close"]), use_container_width=True)
+st.plotly_chart(sparkline_chart(recent["Date"], recent["Close"]), width="stretch")
 
 # ── Quick stats ──────────────────────────────────────────────────────────────
 

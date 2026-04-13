@@ -137,4 +137,4 @@ fig = technical_subplot(
     show_bollinger=show_bb,
     bb_window=bb_window,
 )
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")

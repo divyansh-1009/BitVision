@@ -66,7 +66,7 @@ def _run_and_display(df: pd.DataFrame, model, *, batch: bool) -> None:
         if len(out) > 500:
             st.caption(f"Showing first 500 of {len(out)} rows.")
             out = out.head(500)
-        st.dataframe(out, use_container_width=True, hide_index=True)
+        st.dataframe(out, width="stretch", hide_index=True)
     else:
         li = pred_all.index[-1]
         lp = float(pred_all.loc[li])

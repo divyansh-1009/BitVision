@@ -202,7 +202,7 @@ predicted = comparison_df["PredictedNextClose"].to_numpy(dtype=float)
 st.subheader("Actual Next Close vs. Predicted Next Close")
 st.plotly_chart(
     actual_vs_predicted(dates, pd.Series(actual, index=plot_idx), pd.Series(predicted, index=plot_idx)),
-    use_container_width=True,
+    width="stretch",
 )
 
 # ── Performance metrics ──────────────────────────────────────────────────────
@@ -234,4 +234,4 @@ err_df = pd.DataFrame(
         ],
     }
 )
-st.dataframe(err_df, use_container_width=True, hide_index=True)
+st.dataframe(err_df, width="stretch", hide_index=True)

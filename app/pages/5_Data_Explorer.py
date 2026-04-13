@@ -58,7 +58,7 @@ if training_file:
     if training_path is not None:
         st.subheader(f"Training Data — {training_file}")
         train_df = load_processed_data(training_path) if training_kind == "processed" else load_raw_data(training_path)
-        st.dataframe(train_df, use_container_width=True, height=400)
+        st.dataframe(train_df, width="stretch", height=400)
     else:
         st.warning(f"Could not resolve training file: {training_file}")
 else:
@@ -69,7 +69,7 @@ if testing_file:
     if testing_path is not None:
         st.subheader(f"Testing Data — {testing_file}")
         test_df = load_processed_data(testing_path) if testing_kind == "processed" else load_raw_data(testing_path)
-        st.dataframe(test_df, use_container_width=True, height=400)
+        st.dataframe(test_df, width="stretch", height=400)
     else:
         st.warning(f"Could not resolve testing file: {testing_file}")
 else:
