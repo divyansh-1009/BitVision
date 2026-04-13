@@ -92,21 +92,32 @@ selected_model_name = choose_default_model(available_models) or available_models
 model = load_model(MODELS_DIR / selected_model_name)
 
 st.subheader("Test values")
+st.caption(
+    "The model’s features are built mostly from **Close** (returns, moving averages, RSI, MACD, …) "
+    "and **Volume**, with **High/Low** feeding ATR. **Open is not used in those formulas**, "
+    "so changing only Open leaves predictions unchanged. Edit **Close** (or volume / high / low) "
+    "to see the forecast move."
+)
 
-with st.form("inf_single"):
-    r1, r2, r3, r4, r5 = st.columns(5)
-    with r1:
-        v_open = st.number_input("Open", value=95000.0, step=10.0, format="%.2f")
-    with r2:
-        v_high = st.number_input("High", value=95100.0, step=10.0, format="%.2f")
-    with r3:
-        v_low = st.number_input("Low", value=94900.0, step=10.0, format="%.2f")
-    with r4:
-        v_close = st.number_input("Close", value=95050.0, step=10.0, format="%.2f")
-    with r5:
-        v_vol = st.number_input("Volume", value=1_000_000.0, step=10_000.0, format="%.0f")
+# number_input shows Streamlit's "Press Enter to apply" hint; there is no API to turn it off.
+st.markdown(
+    "<style>div[data-testid='InputInstructions']{display:none!important;}</style>",
+    unsafe_allow_html=True,
+)
 
-    single_go = st.form_submit_button("Predict", type="primary")
+r1, r2, r3, r4, r5 = st.columns(5)
+with r1:
+    v_open = st.number_input("Open", value=95000.0, step=10.0, format="%.2f", key="inf_open")
+with r2:
+    v_high = st.number_input("High", value=95100.0, step=10.0, format="%.2f", key="inf_high")
+with r3:
+    v_low = st.number_input("Low", value=94900.0, step=10.0, format="%.2f", key="inf_low")
+with r4:
+    v_close = st.number_input("Close", value=95050.0, step=10.0, format="%.2f", key="inf_close")
+with r5:
+    v_vol = st.number_input("Volume", value=1_000_000.0, step=10_000.0, format="%.0f", key="inf_vol")
+
+single_go = st.button("Predict", type="primary", key="inf_predict_single")
 
 if single_go:
     d0 = _dataframe_from_single_ohlcv(v_open, v_high, v_low, v_close, v_vol)
