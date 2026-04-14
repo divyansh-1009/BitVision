@@ -92,12 +92,6 @@ selected_model_name = choose_default_model(available_models) or available_models
 model = load_model(MODELS_DIR / selected_model_name)
 
 st.subheader("Test values")
-st.caption(
-    "The model’s features are built mostly from **Close** (returns, moving averages, RSI, MACD, …) "
-    "and **Volume**, with **High/Low** feeding ATR. **Open is not used in those formulas**, "
-    "so changing only Open leaves predictions unchanged. Edit **Close** (or volume / high / low) "
-    "to see the forecast move."
-)
 
 # number_input shows Streamlit's "Press Enter to apply" hint; there is no API to turn it off.
 st.markdown(
